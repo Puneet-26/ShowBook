@@ -2,11 +2,16 @@ const prisma = require('../config/prisma');
 const { AppError } = require('../middleware/errorHandler');
 
 class ShowService {
-  async listShows({ movieId, theatreId, date }) {
-    const where = {
-      status: 'OPEN',
-      startTime: { gte: new Date() },
-    };
+  async listShows({ movieId, theatreId, date, status }) {
+    const where = {};
+
+    if (status && status !== 'ALL') {
+      where.status = status;
+    } else if (!status) {
+      where.status = 'OPEN';
+      where.startTime = { gte: new Date() };
+    }
+    // If status === 'ALL', admin sees all scheduled, past, and cancelled shows
 
     if (movieId) {
       where.movieId = movieId;
@@ -28,7 +33,7 @@ class ShowService {
 
     return prisma.show.findMany({
       where,
-      orderBy: { startTime: 'asc' },
+      orderBy: { startTime: 'desc' },
       include: {
         movie: {
           select: {
@@ -184,14 +189,31 @@ class ShowService {
   }
 
   async createShow({ movieId, screenId, startTime, endTime, basePrice }) {
+    // 1. Verify movie exists in catalog
+    const movie = await prisma.movie.findUnique({
+      where: { id: movieId },
+    });
+
+    if (!movie) {
+      throw new AppError('Movie not found. Please add the movie to the catalog first.', 404);
+    }
+
+    if (movie.status === 'ARCHIVED') {
+      throw new AppError('Cannot schedule shows for an archived movie. Please change its status first.', 400);
+    }
+
     const start = new Date(startTime);
-    const end = new Date(endTime);
+    let end = endTime ? new Date(endTime) : new Date(start.getTime() + (movie.durationMins || 120) * 60 * 1000);
 
     if (start <= new Date()) {
       throw new AppError('Show start time must be in the future.', 400);
     }
 
-    // Verify screen exists
+    if (end <= start) {
+      throw new AppError('Show end time must be after start time.', 400);
+    }
+
+    // 2. Verify screen exists
     const screen = await prisma.screen.findUnique({
       where: { id: screenId },
       include: { seats: true },

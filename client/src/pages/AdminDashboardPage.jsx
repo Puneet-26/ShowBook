@@ -1,6 +1,35 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Search, AlertCircle, CheckCircle2, Trash2, Ban } from 'lucide-react';
+import {
+  Plus,
+  Search,
+  AlertCircle,
+  CheckCircle2,
+  Ban,
+  Edit2,
+  Eye,
+  Film,
+  Calendar,
+  Clock,
+  Archive,
+  RefreshCw,
+  X,
+} from 'lucide-react';
 import api from '../services/api';
+
+const DEFAULT_POSTER_FALLBACK =
+  'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?auto=format&fit=crop&w=600&q=80';
+
+const INITIAL_MOVIE_FORM = {
+  title: '',
+  description: '',
+  genre: '',
+  language: '',
+  durationMins: 120,
+  releaseDate: new Date().toISOString().split('T')[0],
+  posterUrl: '',
+  ageRating: 'UA',
+  status: 'NOW_SHOWING',
+};
 
 export default function AdminDashboardPage() {
   const [activeTab, setActiveTab] = useState('SHOWS');
@@ -12,27 +41,17 @@ export default function AdminDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [actionMessage, setActionMessage] = useState(null);
 
-  // Simple inline form visibility toggles
-  const [showAddMovie, setShowAddMovie] = useState(false);
+  // Movie management states
+  const [showMovieForm, setShowMovieForm] = useState(false);
+  const [editingMovieId, setEditingMovieId] = useState(null);
+  const [movieForm, setMovieForm] = useState(INITIAL_MOVIE_FORM);
+  const [movieFormSubmitting, setMovieFormSubmitting] = useState(false);
+  const [viewingMovie, setViewingMovie] = useState(null);
+
+  // Show management states
   const [showAddShow, setShowAddShow] = useState(false);
-
-  // Search in bookings
-  const [bookingSearch, setBookingSearch] = useState('');
-  const [bookingFilter, setBookingFilter] = useState('ALL');
-
-  // Form states
-  const [movieForm, setMovieForm] = useState({
-    title: '',
-    description: '',
-    genre: '',
-    language: '',
-    durationMins: 120,
-    releaseDate: new Date().toISOString().split('T')[0],
-    posterUrl: '',
-    ageRating: 'UA',
-    status: 'NOW_SHOWING',
-  });
-
+  const [showFilter, setShowFilter] = useState('ALL');
+  const [showFormSubmitting, setShowFormSubmitting] = useState(false);
   const [showForm, setShowForm] = useState({
     movieId: '',
     screenId: '',
@@ -41,80 +60,213 @@ export default function AdminDashboardPage() {
     basePrice: 250,
   });
 
+  // Bookings inspector states
+  const [bookingSearch, setBookingSearch] = useState('');
+  const [bookingFilter, setBookingFilter] = useState('ALL');
+
   useEffect(() => {
     fetchAdminData();
   }, []);
 
   const fetchAdminData = async () => {
     setLoading(true);
+    setActionMessage(null);
     try {
+      // Note: Passing status=ALL correctly returns all catalog movies including archived
       const [dashRes, moviesRes, theatresRes, showsRes, bookingsRes] = await Promise.all([
         api.get('/admin/dashboard'),
         api.get('/movies?status=ALL'),
         api.get('/theatres'),
-        api.get('/shows'),
+        api.get('/shows?status=ALL'),
         api.get('/admin/bookings'),
       ]);
 
-      setStats(dashRes.data.data.stats);
-      setMovies(moviesRes.data.data.movies);
-      setTheatres(theatresRes.data.data.theatres);
-      setShows(showsRes.data.data.shows);
-      setAllBookings(bookingsRes.data.data.bookings);
+      setStats(dashRes.data?.data?.stats || null);
+      setMovies(moviesRes.data?.data?.movies || []);
+      setTheatres(theatresRes.data?.data?.theatres || []);
+      setShows(showsRes.data?.data?.shows || []);
+      setAllBookings(bookingsRes.data?.data?.bookings || []);
     } catch (err) {
       console.error('Error fetching admin data:', err);
+      setActionMessage({
+        type: 'error',
+        text: err.response?.data?.error || 'Failed to load admin dashboard data. Please try again.',
+      });
     } finally {
       setLoading(false);
     }
   };
 
-  const handleCreateMovie = async (e) => {
+  // --- MOVIE MANAGEMENT HANDLERS ---
+
+  const handleOpenAddMovie = () => {
+    setEditingMovieId(null);
+    setMovieForm(INITIAL_MOVIE_FORM);
+    setShowMovieForm(true);
+  };
+
+  const handleOpenEditMovie = (movie) => {
+    setEditingMovieId(movie.id);
+    setMovieForm({
+      title: movie.title,
+      description: movie.description,
+      genre: movie.genre,
+      language: movie.language,
+      durationMins: movie.durationMins,
+      releaseDate: movie.releaseDate
+        ? new Date(movie.releaseDate).toISOString().split('T')[0]
+        : new Date().toISOString().split('T')[0],
+      posterUrl: movie.posterUrl || '',
+      ageRating: movie.ageRating || 'UA',
+      status: movie.status || 'NOW_SHOWING',
+    });
+    setShowMovieForm(true);
+    window.scrollTo({ top: 350, behavior: 'smooth' });
+  };
+
+  const handleCloseMovieForm = () => {
+    setShowMovieForm(false);
+    setEditingMovieId(null);
+    setMovieForm(INITIAL_MOVIE_FORM);
+  };
+
+  const handleMovieFormSubmit = async (e) => {
     e.preventDefault();
     setActionMessage(null);
+    setMovieFormSubmitting(true);
+
     try {
-      await api.post('/admin/movies', movieForm);
-      setActionMessage({ type: 'success', text: 'Movie added successfully.' });
-      setShowAddMovie(false);
-      setMovieForm({
-        title: '',
-        description: '',
-        genre: '',
-        language: '',
-        durationMins: 120,
-        releaseDate: new Date().toISOString().split('T')[0],
-        posterUrl: '',
-        ageRating: 'UA',
-        status: 'NOW_SHOWING',
-      });
-      fetchAdminData();
+      const payload = {
+        title: movieForm.title.trim(),
+        description: movieForm.description.trim(),
+        genre: movieForm.genre.trim(),
+        language: movieForm.language.trim(),
+        durationMins: parseInt(movieForm.durationMins, 10),
+        releaseDate: movieForm.releaseDate,
+        posterUrl: movieForm.posterUrl.trim(),
+        ageRating: movieForm.ageRating.trim(),
+        status: movieForm.status,
+      };
+
+      if (editingMovieId) {
+        // Edit existing movie
+        await api.patch(`/admin/movies/${editingMovieId}`, payload);
+        setActionMessage({
+          type: 'success',
+          text: `Movie "${payload.title}" updated successfully!`,
+        });
+      } else {
+        // Add new movie
+        await api.post('/admin/movies', payload);
+        setActionMessage({
+          type: 'success',
+          text: `Movie "${payload.title}" added to catalog successfully!`,
+        });
+      }
+
+      handleCloseMovieForm();
+      await fetchAdminData();
+    } catch (err) {
+      const errDetails = err.response?.data?.details;
+      let errorMsg = err.response?.data?.error || 'Failed to save movie.';
+      if (Array.isArray(errDetails) && errDetails.length > 0) {
+        errorMsg += ` (${errDetails.map((d) => d.message).join(', ')})`;
+      }
+      setActionMessage({ type: 'error', text: errorMsg });
+    } finally {
+      setMovieFormSubmitting(false);
+    }
+  };
+
+  const handleArchiveMovie = async (movieId, movieTitle, currentStatus) => {
+    const action = currentStatus === 'ARCHIVED' ? 'restore' : 'archive';
+    if (!window.confirm(`Are you sure you want to ${action} "${movieTitle}"?`)) {
+      return;
+    }
+
+    setActionMessage(null);
+    try {
+      if (currentStatus === 'ARCHIVED') {
+        // Restore to NOW_SHOWING
+        await api.patch(`/admin/movies/${movieId}`, { status: 'NOW_SHOWING' });
+        setActionMessage({
+          type: 'success',
+          text: `Movie "${movieTitle}" restored to Now Showing.`,
+        });
+      } else {
+        // Soft archive preserving all historical bookings
+        await api.delete(`/admin/movies/${movieId}`);
+        setActionMessage({
+          type: 'success',
+          text: `Movie "${movieTitle}" archived safely. Booking history preserved.`,
+        });
+      }
+      await fetchAdminData();
     } catch (err) {
       setActionMessage({
         type: 'error',
-        text: err.response?.data?.error || 'Failed to add movie.',
+        text: err.response?.data?.error || 'Failed to update movie status.',
       });
     }
   };
 
-  const handleDeleteMovie = async (movieId) => {
-    if (!window.confirm('Archive / remove this movie from catalog?')) return;
-    try {
-      await api.delete(`/admin/movies/${movieId}`);
-      setActionMessage({ type: 'success', text: 'Movie archived/removed.' });
-      fetchAdminData();
-    } catch (err) {
-      setActionMessage({
-        type: 'error',
-        text: err.response?.data?.error || 'Failed to delete movie.',
-      });
+  // --- SHOW SCHEDULING HANDLERS ---
+
+  // Auto-calculate end time whenever movie or startTime changes
+  const handleShowMovieChange = (movieId) => {
+    const selected = movies.find((m) => m.id === movieId);
+    const updated = { ...showForm, movieId };
+
+    if (selected && showForm.startTime) {
+      const start = new Date(showForm.startTime);
+      const end = new Date(start.getTime() + (selected.durationMins || 120) * 60 * 1000);
+      updated.endTime = formatDateTimeLocal(end);
     }
+    setShowForm(updated);
+  };
+
+  const handleShowStartTimeChange = (startTimeVal) => {
+    const updated = { ...showForm, startTime: startTimeVal };
+    const selected = movies.find((m) => m.id === showForm.movieId);
+
+    if (startTimeVal && selected) {
+      const start = new Date(startTimeVal);
+      const end = new Date(start.getTime() + (selected.durationMins || 120) * 60 * 1000);
+      updated.endTime = formatDateTimeLocal(end);
+    }
+    setShowForm(updated);
+  };
+
+  const formatDateTimeLocal = (date) => {
+    const pad = (n) => String(n).padStart(2, '0');
+    const y = date.getFullYear();
+    const m = pad(date.getMonth() + 1);
+    const d = pad(date.getDate());
+    const hh = pad(date.getHours());
+    const mm = pad(date.getMinutes());
+    return `${y}-${m}-${d}T${hh}:${mm}`;
   };
 
   const handleCreateShow = async (e) => {
     e.preventDefault();
     setActionMessage(null);
+    setShowFormSubmitting(true);
+
     try {
-      await api.post('/admin/shows', showForm);
-      setActionMessage({ type: 'success', text: 'Show scheduled successfully without conflicts.' });
+      const payload = {
+        movieId: showForm.movieId,
+        screenId: showForm.screenId,
+        startTime: new Date(showForm.startTime).toISOString(),
+        endTime: showForm.endTime ? new Date(showForm.endTime).toISOString() : undefined,
+        basePrice: parseFloat(showForm.basePrice),
+      };
+
+      const res = await api.post('/admin/shows', payload);
+      setActionMessage({
+        type: 'success',
+        text: 'Show scheduled successfully! Seat layout and allocations generated without conflicts.',
+      });
+
       setShowAddShow(false);
       setShowForm({
         movieId: '',
@@ -123,23 +275,36 @@ export default function AdminDashboardPage() {
         endTime: '',
         basePrice: 250,
       });
-      fetchAdminData();
+
+      await fetchAdminData();
     } catch (err) {
-      setActionMessage({
-        type: 'error',
-        text: err.response?.data?.error || 'Scheduling conflict or validation error.',
-      });
+      const errDetails = err.response?.data?.details;
+      let errorMsg = err.response?.data?.error || 'Failed to schedule show.';
+      if (Array.isArray(errDetails) && errDetails.length > 0) {
+        errorMsg += ` (${errDetails.map((d) => d.message).join(', ')})`;
+      }
+      setActionMessage({ type: 'error', text: errorMsg });
+    } finally {
+      setShowFormSubmitting(false);
     }
   };
 
   const handleCancelShow = async (showId) => {
-    if (!window.confirm('Cancelling this show will cancel all user bookings for it. Continue?')) {
+    if (
+      !window.confirm(
+        'Cancelling this show will cancel all active user bookings and release seats. Continue?'
+      )
+    ) {
       return;
     }
+    setActionMessage(null);
     try {
       const res = await api.post(`/admin/shows/${showId}/cancel`);
-      setActionMessage({ type: 'success', text: res.data.message });
-      fetchAdminData();
+      setActionMessage({
+        type: 'success',
+        text: res.data?.message || 'Show cancelled successfully.',
+      });
+      await fetchAdminData();
     } catch (err) {
       setActionMessage({
         type: 'error',
@@ -148,20 +313,34 @@ export default function AdminDashboardPage() {
     }
   };
 
+  // --- FILTERED DATA COMPUTATIONS ---
+
   const filteredBookings = allBookings.filter((b) => {
     const matchesFilter = bookingFilter === 'ALL' || b.status === bookingFilter;
     const query = bookingSearch.toLowerCase().trim();
     const matchesSearch =
       !query ||
-      b.bookingRef.toLowerCase().includes(query) ||
-      b.user.email.toLowerCase().includes(query) ||
-      b.movie.title.toLowerCase().includes(query);
+      b.bookingRef?.toLowerCase().includes(query) ||
+      b.user?.email?.toLowerCase().includes(query) ||
+      b.user?.name?.toLowerCase().includes(query) ||
+      b.movie?.title?.toLowerCase().includes(query);
     return matchesFilter && matchesSearch;
   });
 
+  const filteredShows = shows.filter((s) => {
+    if (showFilter === 'ALL') return true;
+    return s.status === showFilter;
+  });
+
   const allScreens = theatres.flatMap((t) =>
-    t.screens.map((s) => ({ ...s, theatreName: t.name }))
+    (t.screens || []).map((s) => ({
+      ...s,
+      theatreName: t.name,
+      theatreLocation: t.location,
+    }))
   );
+
+  const activeMovies = movies.filter((m) => m.status !== 'ARCHIVED');
 
   if (loading) {
     return (
@@ -172,12 +351,14 @@ export default function AdminDashboardPage() {
   }
 
   return (
-    <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      {/* Header */}
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 pb-4 mb-6">
         <div>
-          <h1 className="text-xl font-bold text-slate-900">Admin Dashboard</h1>
-          <p className="text-xs text-slate-500 mt-0.5">Manage movies, showtimes, and view bookings.</p>
+          <h1 className="text-2xl font-bold text-slate-900">Admin Control Center</h1>
+          <p className="text-xs text-slate-500 mt-0.5">
+            Manage movie catalogue, screen schedules, seat allocations, and booking audit records.
+          </p>
         </div>
 
         {/* Tab Switcher */}
@@ -185,7 +366,7 @@ export default function AdminDashboardPage() {
           <button
             onClick={() => setActiveTab('SHOWS')}
             className={`px-3 py-1.5 rounded transition ${
-              activeTab === 'SHOWS' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-500'
+              activeTab === 'SHOWS' ? 'bg-white text-slate-900 shadow-2xs font-bold' : 'text-slate-500 hover:text-slate-900'
             }`}
           >
             Shows ({shows.length})
@@ -193,7 +374,7 @@ export default function AdminDashboardPage() {
           <button
             onClick={() => setActiveTab('MOVIES')}
             className={`px-3 py-1.5 rounded transition ${
-              activeTab === 'MOVIES' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-500'
+              activeTab === 'MOVIES' ? 'bg-white text-slate-900 shadow-2xs font-bold' : 'text-slate-500 hover:text-slate-900'
             }`}
           >
             Movies ({movies.length})
@@ -201,7 +382,7 @@ export default function AdminDashboardPage() {
           <button
             onClick={() => setActiveTab('BOOKINGS')}
             className={`px-3 py-1.5 rounded transition ${
-              activeTab === 'BOOKINGS' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-500'
+              activeTab === 'BOOKINGS' ? 'bg-white text-slate-900 shadow-2xs font-bold' : 'text-slate-500 hover:text-slate-900'
             }`}
           >
             Bookings ({allBookings.length})
@@ -209,30 +390,40 @@ export default function AdminDashboardPage() {
         </div>
       </div>
 
-      {/* Overview Metric Summary */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
-        <div className="bg-white border border-slate-200 rounded-lg p-4">
-          <span className="text-[11px] text-slate-400 block font-semibold uppercase">Total Revenue</span>
-          <span className="text-xl font-bold text-slate-900 mt-0.5 block">₹{stats?.totalRevenue || 0}</span>
+      {/* Overview Metrics Cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
+        <div className="bg-white border border-slate-200 rounded-lg p-3.5">
+          <span className="text-[10px] text-slate-400 block font-semibold uppercase tracking-wider">Total Revenue</span>
+          <span className="text-lg font-bold text-slate-900 mt-0.5 block">₹{stats?.totalRevenue || 0}</span>
         </div>
-        <div className="bg-white border border-slate-200 rounded-lg p-4">
-          <span className="text-[11px] text-slate-400 block font-semibold uppercase">Confirmed Bookings</span>
-          <span className="text-xl font-bold text-slate-900 mt-0.5 block">{stats?.confirmedBookings || 0}</span>
+        <div className="bg-white border border-slate-200 rounded-lg p-3.5">
+          <span className="text-[10px] text-slate-400 block font-semibold uppercase tracking-wider">Confirmed Bookings</span>
+          <span className="text-lg font-bold text-emerald-600 mt-0.5 block">{stats?.confirmedBookings || 0}</span>
         </div>
-        <div className="bg-white border border-slate-200 rounded-lg p-4">
-          <span className="text-[11px] text-slate-400 block font-semibold uppercase">Active Shows</span>
-          <span className="text-xl font-bold text-slate-900 mt-0.5 block">{stats?.activeShows || 0}</span>
+        <div className="bg-white border border-slate-200 rounded-lg p-3.5">
+          <span className="text-[10px] text-slate-400 block font-semibold uppercase tracking-wider">Cancelled Bookings</span>
+          <span className="text-lg font-bold text-rose-500 mt-0.5 block">{stats?.cancelledBookings || 0}</span>
         </div>
-        <div className="bg-white border border-slate-200 rounded-lg p-4">
-          <span className="text-[11px] text-slate-400 block font-semibold uppercase">Cancellations</span>
-          <span className="text-xl font-bold text-slate-500 mt-0.5 block">{stats?.cancelledBookings || 0}</span>
+        <div className="bg-white border border-slate-200 rounded-lg p-3.5">
+          <span className="text-[10px] text-slate-400 block font-semibold uppercase tracking-wider">Active Shows</span>
+          <span className="text-lg font-bold text-indigo-600 mt-0.5 block">{stats?.activeShows || 0}</span>
+        </div>
+        <div className="bg-white border border-slate-200 rounded-lg p-3.5">
+          <span className="text-[10px] text-slate-400 block font-semibold uppercase tracking-wider">Catalogue Movies</span>
+          <span className="text-lg font-bold text-slate-900 mt-0.5 block">{stats?.movies || movies.length}</span>
+        </div>
+        <div className="bg-white border border-slate-200 rounded-lg p-3.5">
+          <span className="text-[10px] text-slate-400 block font-semibold uppercase tracking-wider">Theatres / Screens</span>
+          <span className="text-lg font-bold text-slate-900 mt-0.5 block">
+            {stats?.theatres || 2} / {stats?.screens || allScreens.length}
+          </span>
         </div>
       </div>
 
-      {/* Action Notification */}
+      {/* Global Action Message Alert */}
       {actionMessage && (
         <div
-          className={`p-3 rounded-lg mb-6 flex items-center justify-between text-xs font-medium ${
+          className={`p-3.5 rounded-xl mb-6 flex items-center justify-between text-xs font-medium transition ${
             actionMessage.type === 'success'
               ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
               : 'bg-rose-50 text-rose-800 border border-rose-200'
@@ -246,158 +437,240 @@ export default function AdminDashboardPage() {
             )}
             <span>{actionMessage.text}</span>
           </div>
-          <button onClick={() => setActionMessage(null)} className="text-slate-400 hover:text-slate-600">
+          <button
+            onClick={() => setActionMessage(null)}
+            className="text-slate-400 hover:text-slate-600 font-bold px-1"
+          >
             &times;
           </button>
         </div>
       )}
 
-      {/* TAB 1: SHOWS & SCHEDULING */}
+      {/* ========================================================================= */}
+      {/* TAB 1: SHOWS & SCREEN SCHEDULING */}
+      {/* ========================================================================= */}
       {activeTab === 'SHOWS' && (
         <div className="space-y-6">
-          <div className="flex justify-between items-center">
-            <h2 className="text-base font-bold text-slate-900">Auditorium Shows</h2>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <h2 className="text-base font-bold text-slate-900">Scheduled Shows</h2>
+              <select
+                value={showFilter}
+                onChange={(e) => setShowFilter(e.target.value)}
+                className="bg-slate-50 border border-slate-200 rounded px-2 py-1 text-xs text-slate-700"
+              >
+                <option value="ALL">All Shows ({shows.length})</option>
+                <option value="OPEN">Open Only</option>
+                <option value="CANCELLED">Cancelled Only</option>
+              </select>
+            </div>
+
             <button
               onClick={() => setShowAddShow(!showAddShow)}
-              className="flex items-center gap-1 px-3 py-1.5 bg-slate-900 text-white rounded text-xs font-semibold"
+              className="flex items-center justify-center gap-1.5 px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-semibold shadow-xs transition"
             >
               <Plus className="w-3.5 h-3.5" />
-              <span>{showAddShow ? 'Close Form' : 'Schedule Show'}</span>
+              <span>{showAddShow ? 'Close Scheduler' : 'Schedule New Show'}</span>
             </button>
           </div>
 
           {/* Inline Schedule Show Form */}
           {showAddShow && (
-            <div className="bg-white border border-slate-300 rounded-xl p-5 shadow-xs">
-              <h3 className="font-bold text-slate-900 text-xs uppercase mb-3">Schedule a Show</h3>
-              <form onSubmit={handleCreateShow} className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+            <div className="bg-white border border-slate-300 rounded-xl p-6 shadow-xs">
+              <div className="border-b border-slate-100 pb-3 mb-4">
+                <h3 className="font-bold text-slate-900 text-sm">Schedule a Movie Show</h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Select a movie from the catalogue, auditorium screen, start time, and ticket price. End time is automatically calculated.
+                </p>
+              </div>
+
+              <form onSubmit={handleCreateShow} className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 text-xs">
                 <div>
-                  <label className="text-slate-600 block mb-1">Movie</label>
+                  <label className="text-slate-700 font-semibold block mb-1">
+                    Select Movie <span className="text-rose-500">*</span>
+                  </label>
                   <select
                     required
                     value={showForm.movieId}
-                    onChange={(e) => setShowForm({ ...showForm, movieId: e.target.value })}
-                    className="w-full p-2 border border-slate-300 rounded"
+                    onChange={(e) => handleShowMovieChange(e.target.value)}
+                    className="w-full p-2 border border-slate-300 rounded-lg focus:ring-1 focus:ring-slate-900"
                   >
-                    <option value="">-- Select Movie --</option>
-                    {movies.map((m) => (
+                    <option value="">-- Choose Catalogue Movie --</option>
+                    {activeMovies.map((m) => (
                       <option key={m.id} value={m.id}>
-                        {m.title} ({m.language})
+                        {m.title} ({m.language} &bull; {m.durationMins}m)
                       </option>
                     ))}
                   </select>
+                  {activeMovies.length === 0 && (
+                    <span className="text-[10px] text-amber-600 block mt-1">
+                      No active movies found. Please add a movie first in the Movies tab.
+                    </span>
+                  )}
                 </div>
 
                 <div>
-                  <label className="text-slate-600 block mb-1">Screen</label>
+                  <label className="text-slate-700 font-semibold block mb-1">
+                    Auditorium Screen <span className="text-rose-500">*</span>
+                  </label>
                   <select
                     required
                     value={showForm.screenId}
                     onChange={(e) => setShowForm({ ...showForm, screenId: e.target.value })}
-                    className="w-full p-2 border border-slate-300 rounded"
+                    className="w-full p-2 border border-slate-300 rounded-lg focus:ring-1 focus:ring-slate-900"
                   >
-                    <option value="">-- Select Screen --</option>
+                    <option value="">-- Choose Screen --</option>
                     {allScreens.map((s) => (
                       <option key={s.id} value={s.id}>
-                        {s.theatreName} - {s.name} ({s.screenNumber})
+                        {s.theatreName} &mdash; {s.name} ({s.totalSeats} seats)
                       </option>
                     ))}
                   </select>
                 </div>
 
                 <div>
-                  <label className="text-slate-600 block mb-1">Start Time</label>
+                  <label className="text-slate-700 font-semibold block mb-1">
+                    Base Ticket Price (₹) <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="number"
+                    required
+                    min="50"
+                    max="5000"
+                    step="10"
+                    value={showForm.basePrice}
+                    onChange={(e) => setShowForm({ ...showForm, basePrice: e.target.value })}
+                    className="w-full p-2 border border-slate-300 rounded-lg focus:ring-1 focus:ring-slate-900"
+                  />
+                  <span className="text-[10px] text-slate-400 block mt-1">
+                    Regular: ₹{Math.round(showForm.basePrice || 0)} | Premium: ₹{Math.round((showForm.basePrice || 0) * 1.4)} | VIP: ₹{Math.round((showForm.basePrice || 0) * 1.8)}
+                  </span>
+                </div>
+
+                <div>
+                  <label className="text-slate-700 font-semibold block mb-1">
+                    Show Start Time <span className="text-rose-500">*</span>
+                  </label>
                   <input
                     type="datetime-local"
                     required
                     value={showForm.startTime}
-                    onChange={(e) => setShowForm({ ...showForm, startTime: e.target.value })}
-                    className="w-full p-2 border border-slate-300 rounded"
+                    onChange={(e) => handleShowStartTimeChange(e.target.value)}
+                    className="w-full p-2 border border-slate-300 rounded-lg focus:ring-1 focus:ring-slate-900"
                   />
                 </div>
 
                 <div>
-                  <label className="text-slate-600 block mb-1">End Time</label>
+                  <label className="text-slate-700 font-semibold block mb-1">
+                    Calculated End Time
+                  </label>
                   <input
                     type="datetime-local"
-                    required
                     value={showForm.endTime}
                     onChange={(e) => setShowForm({ ...showForm, endTime: e.target.value })}
-                    className="w-full p-2 border border-slate-300 rounded"
+                    className="w-full p-2 border border-slate-300 rounded-lg bg-slate-50 text-slate-700 focus:ring-1 focus:ring-slate-900"
                   />
-                </div>
-
-                <div>
-                  <label className="text-slate-600 block mb-1">Base Ticket Price (₹)</label>
-                  <input
-                    type="number"
-                    required
-                    value={showForm.basePrice}
-                    onChange={(e) => setShowForm({ ...showForm, basePrice: parseFloat(e.target.value) })}
-                    className="w-full p-2 border border-slate-300 rounded"
-                  />
+                  <span className="text-[10px] text-slate-400 block mt-1">
+                    Auto-calculated from movie duration. Can be manually adjusted.
+                  </span>
                 </div>
 
                 <div className="flex items-end">
                   <button
                     type="submit"
-                    className="w-full py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded text-xs"
+                    disabled={showFormSubmitting || !showForm.movieId || !showForm.screenId}
+                    className="w-full py-2.5 px-4 bg-rose-600 hover:bg-rose-700 disabled:bg-slate-300 text-white font-bold rounded-lg transition"
                   >
-                    Confirm & Schedule Show
+                    {showFormSubmitting ? 'Validating Conflicts...' : 'Confirm & Schedule Show'}
                   </button>
                 </div>
               </form>
             </div>
           )}
 
-          {/* Shows Table */}
-          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+          {/* Scheduled Shows Table */}
+          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
                 <thead className="bg-slate-50 text-slate-500 font-semibold border-b border-slate-200">
                   <tr>
-                    <th className="py-2.5 px-3">Movie</th>
-                    <th className="py-2.5 px-3">Auditorium</th>
-                    <th className="py-2.5 px-3">Start Time</th>
-                    <th className="py-2.5 px-3">Price</th>
-                    <th className="py-2.5 px-3">Status</th>
-                    <th className="py-2.5 px-3 text-right">Action</th>
+                    <th className="py-3 px-4">Movie</th>
+                    <th className="py-3 px-4">Auditorium Screen</th>
+                    <th className="py-3 px-4">Start Time & Date</th>
+                    <th className="py-3 px-4">Base Price</th>
+                    <th className="py-3 px-4">Status</th>
+                    <th className="py-3 px-4 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {shows.map((s) => (
-                    <tr key={s.id} className="hover:bg-slate-50/50">
-                      <td className="py-2.5 px-3 font-bold text-slate-900">{s.movie.title}</td>
-                      <td className="py-2.5 px-3 text-slate-600">
-                        {s.screen.theatre.name} - {s.screen.name}
-                      </td>
-                      <td className="py-2.5 px-3 text-slate-800">
-                        {new Date(s.startTime).toLocaleString()}
-                      </td>
-                      <td className="py-2.5 px-3 font-semibold text-slate-900">₹{s.basePrice}</td>
-                      <td className="py-2.5 px-3">
-                        <span
-                          className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${
-                            s.status === 'OPEN'
-                              ? 'bg-emerald-100 text-emerald-800'
-                              : 'bg-rose-100 text-rose-800'
-                          }`}
-                        >
-                          {s.status}
-                        </span>
-                      </td>
-                      <td className="py-2.5 px-3 text-right">
-                        {s.status === 'OPEN' && (
-                          <button
-                            onClick={() => handleCancelShow(s.id)}
-                            className="inline-flex items-center gap-1 text-[11px] font-medium text-rose-600 hover:text-rose-800"
-                          >
-                            <Ban className="w-3 h-3" /> Cancel
-                          </button>
-                        )}
+                  {filteredShows.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="py-12 text-center text-slate-400">
+                        No scheduled shows matching filter. Click "Schedule New Show" above to add one.
                       </td>
                     </tr>
-                  ))}
+                  ) : (
+                    filteredShows.map((s) => (
+                      <tr key={s.id} className="hover:bg-slate-50/60 transition">
+                        <td className="py-3 px-4 font-bold text-slate-900">
+                          <div className="flex items-center gap-2.5">
+                            {s.movie?.posterUrl && (
+                              <img
+                                src={s.movie.posterUrl}
+                                alt={s.movie.title}
+                                className="w-7 h-10 object-cover rounded bg-slate-100 flex-shrink-0"
+                                onError={(e) => {
+                                  e.target.src = DEFAULT_POSTER_FALLBACK;
+                                }}
+                              />
+                            )}
+                            <div>
+                              <span className="block font-bold text-slate-900">{s.movie?.title}</span>
+                              <span className="text-[11px] text-slate-400 font-normal">
+                                {s.movie?.language} &bull; {s.movie?.genre}
+                              </span>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="py-3 px-4 text-slate-700">
+                          <span className="font-semibold block">{s.screen?.theatre?.name}</span>
+                          <span className="text-slate-400 text-[11px]">{s.screen?.name}</span>
+                        </td>
+                        <td className="py-3 px-4 text-slate-800">
+                          <span className="font-medium block">{new Date(s.startTime).toLocaleDateString()}</span>
+                          <span className="text-slate-500 text-[11px]">
+                            {new Date(s.startTime).toLocaleTimeString([], {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 font-bold text-slate-900">₹{s.basePrice}</td>
+                        <td className="py-3 px-4">
+                          <span
+                            className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                              s.status === 'OPEN'
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : 'bg-rose-100 text-rose-800'
+                            }`}
+                          >
+                            {s.status}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-right">
+                          {s.status === 'OPEN' && (
+                            <button
+                              onClick={() => handleCancelShow(s.id)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold text-rose-600 hover:text-rose-800 hover:bg-rose-50 rounded transition"
+                              title="Cancel show and release all seat allocations"
+                            >
+                              <Ban className="w-3.5 h-3.5" /> Cancel Show
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
@@ -405,146 +678,370 @@ export default function AdminDashboardPage() {
         </div>
       )}
 
-      {/* TAB 2: MOVIES CATALOG */}
+      {/* ========================================================================= */}
+      {/* TAB 2: MOVIE CATALOGUE & EDITING */}
+      {/* ========================================================================= */}
       {activeTab === 'MOVIES' && (
         <div className="space-y-6">
-          <div className="flex justify-between items-center">
-            <h2 className="text-base font-bold text-slate-900">Movie Catalog</h2>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h2 className="text-base font-bold text-slate-900">Movie Catalogue Manager</h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Add, edit details, preview posters, or archive cinematic titles in the platform.
+              </p>
+            </div>
+
             <button
-              onClick={() => setShowAddMovie(!showAddMovie)}
-              className="flex items-center gap-1 px-3 py-1.5 bg-slate-900 text-white rounded text-xs font-semibold"
+              onClick={showMovieForm ? handleCloseMovieForm : handleOpenAddMovie}
+              className="flex items-center justify-center gap-1.5 px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-semibold shadow-xs transition"
             >
-              <Plus className="w-3.5 h-3.5" />
-              <span>{showAddMovie ? 'Close Form' : 'Add Movie'}</span>
+              {showMovieForm ? <X className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
+              <span>{showMovieForm ? 'Close Movie Form' : 'Add New Movie'}</span>
             </button>
           </div>
 
-          {showAddMovie && (
-            <div className="bg-white border border-slate-300 rounded-xl p-5 shadow-xs">
-              <h3 className="font-bold text-slate-900 text-xs uppercase mb-3">Add Movie</h3>
-              <form onSubmit={handleCreateMovie} className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+          {/* Inline Add / Edit Movie Form */}
+          {showMovieForm && (
+            <div className="bg-white border border-slate-300 rounded-xl p-6 shadow-xs">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
                 <div>
-                  <label className="text-slate-600 block mb-1">Title</label>
-                  <input
-                    type="text"
-                    required
-                    value={movieForm.title}
-                    onChange={(e) => setMovieForm({ ...movieForm, title: e.target.value })}
-                    className="w-full p-2 border border-slate-300 rounded"
-                  />
+                  <h3 className="font-bold text-slate-900 text-sm">
+                    {editingMovieId ? `Edit Movie: ${movieForm.title || 'Details'}` : 'Add New Movie to Catalogue'}
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    {editingMovieId
+                      ? 'Modify title, description, poster URL, duration, or change availability status.'
+                      : 'Provide all required metadata and poster image URL to register the movie.'}
+                  </p>
                 </div>
+                <button
+                  type="button"
+                  onClick={handleCloseMovieForm}
+                  className="text-slate-400 hover:text-slate-600 text-xs font-semibold px-2 py-1"
+                >
+                  Cancel
+                </button>
+              </div>
+
+              <form onSubmit={handleMovieFormSubmit} className="space-y-4 text-xs">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                  {/* Title */}
+                  <div className="md:col-span-2">
+                    <label className="text-slate-700 font-semibold block mb-1">
+                      Movie Title <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. Inception, Interstellar..."
+                      value={movieForm.title}
+                      onChange={(e) => setMovieForm({ ...movieForm, title: e.target.value })}
+                      className="w-full p-2 border border-slate-300 rounded-lg focus:ring-1 focus:ring-slate-900"
+                    />
+                  </div>
+
+                  {/* Status */}
+                  <div>
+                    <label className="text-slate-700 font-semibold block mb-1">
+                      Catalogue Status <span className="text-rose-500">*</span>
+                    </label>
+                    <select
+                      value={movieForm.status}
+                      onChange={(e) => setMovieForm({ ...movieForm, status: e.target.value })}
+                      className="w-full p-2 border border-slate-300 rounded-lg focus:ring-1 focus:ring-slate-900 font-medium"
+                    >
+                      <option value="NOW_SHOWING">NOW_SHOWING (Active in Listings)</option>
+                      <option value="UPCOMING">UPCOMING (Coming Soon)</option>
+                      <option value="ARCHIVED">ARCHIVED (Hidden from Booking)</option>
+                    </select>
+                  </div>
+
+                  {/* Genre */}
+                  <div>
+                    <label className="text-slate-700 font-semibold block mb-1">
+                      Genre <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. Sci-Fi, Action, Drama"
+                      value={movieForm.genre}
+                      onChange={(e) => setMovieForm({ ...movieForm, genre: e.target.value })}
+                      className="w-full p-2 border border-slate-300 rounded-lg focus:ring-1 focus:ring-slate-900"
+                    />
+                  </div>
+
+                  {/* Language */}
+                  <div>
+                    <label className="text-slate-700 font-semibold block mb-1">
+                      Language <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. English, Hindi, Telugu"
+                      value={movieForm.language}
+                      onChange={(e) => setMovieForm({ ...movieForm, language: e.target.value })}
+                      className="w-full p-2 border border-slate-300 rounded-lg focus:ring-1 focus:ring-slate-900"
+                    />
+                  </div>
+
+                  {/* Duration */}
+                  <div>
+                    <label className="text-slate-700 font-semibold block mb-1">
+                      Duration (Minutes) <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      type="number"
+                      required
+                      min="1"
+                      max="600"
+                      value={movieForm.durationMins}
+                      onChange={(e) => setMovieForm({ ...movieForm, durationMins: e.target.value })}
+                      className="w-full p-2 border border-slate-300 rounded-lg focus:ring-1 focus:ring-slate-900"
+                    />
+                  </div>
+
+                  {/* Release Date */}
+                  <div>
+                    <label className="text-slate-700 font-semibold block mb-1">
+                      Release Date <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      type="date"
+                      required
+                      value={movieForm.releaseDate}
+                      onChange={(e) => setMovieForm({ ...movieForm, releaseDate: e.target.value })}
+                      className="w-full p-2 border border-slate-300 rounded-lg focus:ring-1 focus:ring-slate-900"
+                    />
+                  </div>
+
+                  {/* Age Rating */}
+                  <div>
+                    <label className="text-slate-700 font-semibold block mb-1">
+                      Age Rating <span className="text-rose-500">*</span>
+                    </label>
+                    <select
+                      value={movieForm.ageRating}
+                      onChange={(e) => setMovieForm({ ...movieForm, ageRating: e.target.value })}
+                      className="w-full p-2 border border-slate-300 rounded-lg focus:ring-1 focus:ring-slate-900"
+                    >
+                      <option value="U">U (Universal)</option>
+                      <option value="UA">UA (Parental Guidance)</option>
+                      <option value="A">A (Adults Only)</option>
+                      <option value="PG-13">PG-13</option>
+                      <option value="R">R (Restricted)</option>
+                    </select>
+                  </div>
+
+                  {/* Poster URL */}
+                  <div>
+                    <label className="text-slate-700 font-semibold block mb-1">
+                      Poster Image URL <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="https://images.unsplash.com/... or /posters/..."
+                      value={movieForm.posterUrl}
+                      onChange={(e) => setMovieForm({ ...movieForm, posterUrl: e.target.value })}
+                      className="w-full p-2 border border-slate-300 rounded-lg focus:ring-1 focus:ring-slate-900"
+                    />
+                  </div>
+                </div>
+
+                {/* Poster Live Preview thumbnail if provided */}
+                {movieForm.posterUrl && (
+                  <div className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-200 rounded-lg">
+                    <img
+                      src={movieForm.posterUrl}
+                      alt="Poster Preview"
+                      className="w-12 h-16 object-cover rounded bg-slate-200 flex-shrink-0"
+                      onError={(e) => {
+                        e.target.src = DEFAULT_POSTER_FALLBACK;
+                      }}
+                    />
+                    <div className="text-[11px] text-slate-500">
+                      <span className="font-semibold text-slate-700 block">Poster Live Preview</span>
+                      <span>If the image fails to load, a fallback cinematic poster is used automatically.</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Description */}
                 <div>
-                  <label className="text-slate-600 block mb-1">Genre</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="Action, Sci-Fi..."
-                    value={movieForm.genre}
-                    onChange={(e) => setMovieForm({ ...movieForm, genre: e.target.value })}
-                    className="w-full p-2 border border-slate-300 rounded"
-                  />
-                </div>
-                <div>
-                  <label className="text-slate-600 block mb-1">Language</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="English, Hindi..."
-                    value={movieForm.language}
-                    onChange={(e) => setMovieForm({ ...movieForm, language: e.target.value })}
-                    className="w-full p-2 border border-slate-300 rounded"
-                  />
-                </div>
-                <div>
-                  <label className="text-slate-600 block mb-1">Duration (mins)</label>
-                  <input
-                    type="number"
-                    required
-                    value={movieForm.durationMins}
-                    onChange={(e) =>
-                      setMovieForm({ ...movieForm, durationMins: parseInt(e.target.value, 10) })
-                    }
-                    className="w-full p-2 border border-slate-300 rounded"
-                  />
-                </div>
-                <div>
-                  <label className="text-slate-600 block mb-1">Poster URL</label>
-                  <input
-                    type="url"
-                    required
-                    placeholder="https://..."
-                    value={movieForm.posterUrl}
-                    onChange={(e) => setMovieForm({ ...movieForm, posterUrl: e.target.value })}
-                    className="w-full p-2 border border-slate-300 rounded"
-                  />
-                </div>
-                <div>
-                  <label className="text-slate-600 block mb-1">Age Rating</label>
-                  <input
-                    type="text"
-                    required
-                    value={movieForm.ageRating}
-                    onChange={(e) => setMovieForm({ ...movieForm, ageRating: e.target.value })}
-                    className="w-full p-2 border border-slate-300 rounded"
-                  />
-                </div>
-                <div className="sm:col-span-2">
-                  <label className="text-slate-600 block mb-1">Description</label>
+                  <label className="text-slate-700 font-semibold block mb-1">
+                    Synopsis / Description <span className="text-rose-500">*</span>
+                  </label>
                   <textarea
                     required
-                    rows={2}
+                    rows={3}
+                    placeholder="Enter movie plot, synopsis, and cast overview..."
                     value={movieForm.description}
                     onChange={(e) => setMovieForm({ ...movieForm, description: e.target.value })}
-                    className="w-full p-2 border border-slate-300 rounded"
+                    className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-1 focus:ring-slate-900"
                   />
                 </div>
-                <div className="sm:col-span-2 flex justify-end">
+
+                {/* Submit and Cancel Buttons */}
+                <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={handleCloseMovieForm}
+                    className="py-2 px-4 border border-slate-300 hover:bg-slate-50 text-slate-700 font-semibold rounded-lg transition"
+                  >
+                    Cancel
+                  </button>
                   <button
                     type="submit"
-                    className="py-2 px-6 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded text-xs"
+                    disabled={movieFormSubmitting}
+                    className="py-2 px-6 bg-rose-600 hover:bg-rose-700 disabled:bg-slate-300 text-white font-bold rounded-lg transition"
                   >
-                    Save Movie
+                    {movieFormSubmitting
+                      ? 'Saving Movie...'
+                      : editingMovieId
+                      ? 'Update Movie'
+                      : 'Add Movie to Catalogue'}
                   </button>
                 </div>
               </form>
             </div>
           )}
 
-          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+          {/* Movie Details Modal / Inspection Card */}
+          {viewingMovie && (
+            <div className="bg-slate-900 text-white rounded-xl p-5 shadow-lg border border-slate-800 flex flex-col sm:flex-row gap-5 items-start">
+              <img
+                src={viewingMovie.posterUrl}
+                alt={viewingMovie.title}
+                className="w-24 h-36 object-cover rounded-lg bg-slate-800 flex-shrink-0"
+                onError={(e) => {
+                  e.target.src = DEFAULT_POSTER_FALLBACK;
+                }}
+              />
+              <div className="flex-1 text-xs space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-lg font-bold text-white">{viewingMovie.title}</h3>
+                  <button
+                    onClick={() => setViewingMovie(null)}
+                    className="text-slate-400 hover:text-white font-bold px-2 py-0.5"
+                  >
+                    &times; Close
+                  </button>
+                </div>
+                <div className="text-slate-400">
+                  {viewingMovie.genre} &bull; {viewingMovie.language} &bull; {viewingMovie.durationMins} mins &bull;{' '}
+                  <span className="text-rose-400 font-bold">{viewingMovie.ageRating}</span>
+                </div>
+                <p className="text-slate-300 leading-relaxed pt-1">{viewingMovie.description}</p>
+                <div className="text-slate-400 text-[11px] pt-1">
+                  Release Date: {new Date(viewingMovie.releaseDate).toLocaleDateString()} &bull; Status:{' '}
+                  <span className="font-semibold text-white">{viewingMovie.status}</span> &bull; Active Shows:{' '}
+                  <span className="font-semibold text-white">{viewingMovie.activeShowsCount || 0}</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Movie Catalogue Table */}
+          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
                 <thead className="bg-slate-50 text-slate-500 font-semibold border-b border-slate-200">
                   <tr>
-                    <th className="py-2.5 px-3">Title</th>
-                    <th className="py-2.5 px-3">Genre & Language</th>
-                    <th className="py-2.5 px-3">Duration</th>
-                    <th className="py-2.5 px-3">Status</th>
-                    <th className="py-2.5 px-3 text-right">Action</th>
+                    <th className="py-3 px-4">Poster & Title</th>
+                    <th className="py-3 px-4">Genre / Language</th>
+                    <th className="py-3 px-4">Duration</th>
+                    <th className="py-3 px-4">Release Date</th>
+                    <th className="py-3 px-4">Status</th>
+                    <th className="py-3 px-4 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {movies.map((m) => (
-                    <tr key={m.id} className="hover:bg-slate-50/50">
-                      <td className="py-2.5 px-3 font-bold text-slate-900">{m.title}</td>
-                      <td className="py-2.5 px-3 text-slate-600">
-                        {m.genre} &bull; {m.language}
-                      </td>
-                      <td className="py-2.5 px-3 text-slate-600">{m.durationMins}m</td>
-                      <td className="py-2.5 px-3">
-                        <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 font-semibold text-[10px]">
-                          {m.status}
-                        </span>
-                      </td>
-                      <td className="py-2.5 px-3 text-right">
-                        <button
-                          onClick={() => handleDeleteMovie(m.id)}
-                          className="text-rose-600 hover:text-rose-800 text-[11px] font-medium"
-                        >
-                          Archive
-                        </button>
+                  {movies.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="py-12 text-center text-slate-400">
+                        No movies in catalog. Click "Add New Movie" above.
                       </td>
                     </tr>
-                  ))}
+                  ) : (
+                    movies.map((m) => (
+                      <tr key={m.id} className="hover:bg-slate-50/60 transition">
+                        <td className="py-3 px-4 font-bold text-slate-900">
+                          <div className="flex items-center gap-2.5">
+                            <img
+                              src={m.posterUrl}
+                              alt={m.title}
+                              className="w-8 h-11 object-cover rounded bg-slate-100 flex-shrink-0"
+                              onError={(e) => {
+                                e.target.src = DEFAULT_POSTER_FALLBACK;
+                              }}
+                            />
+                            <div>
+                              <span className="font-bold text-slate-900 block">{m.title}</span>
+                              <span className="text-[11px] text-slate-400 font-normal">{m.ageRating}</span>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="py-3 px-4 text-slate-600">
+                          <span className="font-medium text-slate-800 block">{m.genre}</span>
+                          <span className="text-slate-400 text-[11px]">{m.language}</span>
+                        </td>
+                        <td className="py-3 px-4 text-slate-600">{m.durationMins}m</td>
+                        <td className="py-3 px-4 text-slate-600">
+                          {m.releaseDate ? new Date(m.releaseDate).toLocaleDateString() : 'N/A'}
+                        </td>
+                        <td className="py-3 px-4">
+                          <span
+                            className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                              m.status === 'NOW_SHOWING'
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : m.status === 'UPCOMING'
+                                ? 'bg-indigo-100 text-indigo-800'
+                                : 'bg-slate-100 text-slate-600'
+                            }`}
+                          >
+                            {m.status}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-right space-x-1.5">
+                          <button
+                            onClick={() => setViewingMovie(m)}
+                            className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded transition"
+                            title="View complete details"
+                          >
+                            <Eye className="w-3.5 h-3.5" /> View
+                          </button>
+                          <button
+                            onClick={() => handleOpenEditMovie(m)}
+                            className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 rounded transition"
+                            title="Edit movie information"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" /> Edit
+                          </button>
+                          <button
+                            onClick={() => handleArchiveMovie(m.id, m.title, m.status)}
+                            className={`inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold rounded transition ${
+                              m.status === 'ARCHIVED'
+                                ? 'text-emerald-700 hover:bg-emerald-50'
+                                : 'text-rose-600 hover:bg-rose-50'
+                            }`}
+                            title={m.status === 'ARCHIVED' ? 'Restore movie' : 'Archive movie'}
+                          >
+                            {m.status === 'ARCHIVED' ? (
+                              <>
+                                <RefreshCw className="w-3.5 h-3.5" /> Restore
+                              </>
+                            ) : (
+                              <>
+                                <Archive className="w-3.5 h-3.5" /> Archive
+                              </>
+                            )}
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
@@ -552,74 +1049,96 @@ export default function AdminDashboardPage() {
         </div>
       )}
 
-      {/* TAB 3: BOOKINGS INSPECTION */}
+      {/* ========================================================================= */}
+      {/* TAB 3: BOOKINGS INSPECTION & AUDITING */}
+      {/* ========================================================================= */}
       {activeTab === 'BOOKINGS' && (
         <div className="space-y-4">
-          <div className="bg-white border border-slate-200 rounded-lg p-3 flex flex-wrap items-center justify-between gap-3 text-xs">
-            <div className="relative flex-1 min-w-[200px]">
-              <Search className="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+          <div className="bg-white border border-slate-200 rounded-lg p-3.5 flex flex-wrap items-center justify-between gap-3 text-xs">
+            <div className="relative flex-1 min-w-[240px]">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
                 type="text"
-                placeholder="Search by ref, email, movie..."
+                placeholder="Search by booking ref, customer name, email, or movie..."
                 value={bookingSearch}
                 onChange={(e) => setBookingSearch(e.target.value)}
-                className="w-full pl-8 pr-3 py-1.5 border border-slate-200 rounded text-xs focus:outline-none"
+                className="w-full pl-9 pr-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-slate-900"
               />
             </div>
 
             <div className="flex items-center gap-2">
-              <span className="text-slate-500">Status:</span>
+              <span className="text-slate-500 font-medium">Status:</span>
               <select
                 value={bookingFilter}
                 onChange={(e) => setBookingFilter(e.target.value)}
-                className="bg-slate-50 border border-slate-200 rounded px-2 py-1 text-xs"
+                className="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 font-medium"
               >
-                <option value="ALL">All Statuses</option>
-                <option value="CONFIRMED">Confirmed</option>
-                <option value="CANCELLED">Cancelled</option>
+                <option value="ALL">All Statuses ({allBookings.length})</option>
+                <option value="CONFIRMED">Confirmed Only</option>
+                <option value="CANCELLED">Cancelled Only</option>
               </select>
             </div>
           </div>
 
-          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
                 <thead className="bg-slate-50 text-slate-500 font-semibold border-b border-slate-200">
                   <tr>
-                    <th className="py-2.5 px-3">Ref</th>
-                    <th className="py-2.5 px-3">Customer</th>
-                    <th className="py-2.5 px-3">Movie</th>
-                    <th className="py-2.5 px-3">Auditorium</th>
-                    <th className="py-2.5 px-3">Seats</th>
-                    <th className="py-2.5 px-3">Amount</th>
-                    <th className="py-2.5 px-3">Status</th>
+                    <th className="py-3 px-4">Booking Ref</th>
+                    <th className="py-3 px-4">Customer</th>
+                    <th className="py-3 px-4">Movie & Showtime</th>
+                    <th className="py-3 px-4">Auditorium Screen</th>
+                    <th className="py-3 px-4">Booked Seats</th>
+                    <th className="py-3 px-4">Amount</th>
+                    <th className="py-3 px-4">Status</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {filteredBookings.map((b) => (
-                    <tr key={b.id} className="hover:bg-slate-50/50">
-                      <td className="py-2.5 px-3 font-mono font-bold text-slate-800">{b.bookingRef}</td>
-                      <td className="py-2.5 px-3 text-slate-700">
-                        <span className="block font-medium">{b.user.name}</span>
-                        <span className="text-slate-400 text-[10px]">{b.user.email}</span>
-                      </td>
-                      <td className="py-2.5 px-3 font-medium text-slate-900">{b.movie.title}</td>
-                      <td className="py-2.5 px-3 text-slate-600">{b.theatre.name}</td>
-                      <td className="py-2.5 px-3 font-bold text-slate-800">{b.seats.join(', ')}</td>
-                      <td className="py-2.5 px-3 font-bold text-rose-600">₹{b.totalAmount}</td>
-                      <td className="py-2.5 px-3">
-                        <span
-                          className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${
-                            b.status === 'CONFIRMED'
-                              ? 'bg-emerald-100 text-emerald-800'
-                              : 'bg-rose-100 text-rose-800'
-                          }`}
-                        >
-                          {b.status}
-                        </span>
+                  {filteredBookings.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="py-12 text-center text-slate-400">
+                        No bookings matching current search or filter.
                       </td>
                     </tr>
-                  ))}
+                  ) : (
+                    filteredBookings.map((b) => (
+                      <tr key={b.id} className="hover:bg-slate-50/60 transition">
+                        <td className="py-3 px-4 font-mono font-bold text-slate-900">{b.bookingRef}</td>
+                        <td className="py-3 px-4 text-slate-700">
+                          <span className="block font-semibold text-slate-900">{b.user?.name || 'Customer'}</span>
+                          <span className="text-slate-400 text-[10px]">{b.user?.email}</span>
+                        </td>
+                        <td className="py-3 px-4 text-slate-800">
+                          <span className="font-semibold text-slate-900 block">{b.movie?.title}</span>
+                          <span className="text-slate-500 text-[11px]">
+                            {new Date(b.showTime).toLocaleDateString()} at{' '}
+                            {new Date(b.showTime).toLocaleTimeString([], {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-slate-600">
+                          <span className="font-medium text-slate-800 block">{b.theatre?.name}</span>
+                          <span className="text-slate-400 text-[11px]">{b.screen}</span>
+                        </td>
+                        <td className="py-3 px-4 font-bold text-slate-800">{b.seats?.join(', ')}</td>
+                        <td className="py-3 px-4 font-bold text-rose-600">₹{b.totalAmount}</td>
+                        <td className="py-3 px-4">
+                          <span
+                            className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                              b.status === 'CONFIRMED'
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : 'bg-rose-100 text-rose-800'
+                            }`}
+                          >
+                            {b.status}
+                          </span>
+                        </td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>

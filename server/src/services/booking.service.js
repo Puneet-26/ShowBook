@@ -102,8 +102,13 @@ class BookingService {
 
         // 4. Record or handle simulated payment
         if (simulatePaymentStatus === 'FAILED') {
-          await tx.paymentAttempt.create({
-            data: {
+          await tx.paymentAttempt.upsert({
+            where: { idempotencyKey },
+            update: {
+              status: 'FAILED',
+              transactionRef: `FAIL-${Date.now()}`,
+            },
+            create: {
               reservationId,
               idempotencyKey,
               amount: reservation.totalAmount,
@@ -173,8 +178,13 @@ class BookingService {
 
         // 9. Record Payment Attempt
         const transactionRef = `SIM-TXN-${Date.now()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
-        await tx.paymentAttempt.create({
-          data: {
+        await tx.paymentAttempt.upsert({
+          where: { idempotencyKey },
+          update: {
+            status: 'SUCCESS',
+            transactionRef,
+          },
+          create: {
             reservationId: reservation.id,
             idempotencyKey,
             amount: reservation.totalAmount,

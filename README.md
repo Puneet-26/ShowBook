@@ -43,7 +43,7 @@ Two concurrent users can never book or reserve the same seat for the same show:
 ### E. Admin Dashboard
 - Live dashboard metrics: Movies, Theatres, Screens, Shows, Confirmed Bookings, and Total Revenue.
 - Global bookings inspector with real-time search by booking reference, customer name, and status filter.
-- Movie catalog manager (Add/Archive).
+- Movie catalog manager (Add, View Details, Edit, and Safe Archive/Restore).
 - Show scheduling with conflict validation (prevents scheduling overlapping shows on the same auditorium screen).
 - Emergency show cancellation (automatically cascades cancellations to affected bookings).
 

@@ -26,7 +26,7 @@ api.interceptors.response.use(
   (error) => {
     // If token is invalid or expired, clear local storage
     if (error.response && error.response.status === 401) {
-      const url = error.config.url;
+      const url = error.config?.url || '';
       // Don't auto-logout if login/register endpoint returned 401
       if (!url.includes('/auth/login') && !url.includes('/auth/register')) {
         localStorage.removeItem('showbook_token');

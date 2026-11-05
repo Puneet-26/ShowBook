@@ -5,12 +5,13 @@ class MovieService {
   async listMovies({ search, genre, language, status }) {
     const where = {};
 
-    if (status) {
+    if (status && status !== 'ALL') {
       where.status = status;
-    } else {
+    } else if (!status) {
       // By default return active movies
       where.status = { in: ['NOW_SHOWING', 'UPCOMING'] };
     }
+    // If status === 'ALL', no status filter is applied so all movies are returned
 
     if (genre && genre !== 'ALL') {
       where.genre = { equals: genre, mode: 'insensitive' };
@@ -137,27 +138,29 @@ class MovieService {
   }
 
   async deleteMovie(id) {
-    const existing = await prisma.movie.findUnique({ where: { id } });
+    const existing = await prisma.movie.findUnique({
+      where: { id },
+      include: {
+        shows: {
+          select: { id: true },
+        },
+      },
+    });
+
     if (!existing) {
       throw new AppError('Movie not found.', 404);
     }
 
-    // Soft archive or cascade delete if no bookings
-    const activeShows = await prisma.show.count({
-      where: {
-        movieId: id,
-        status: 'OPEN',
-        startTime: { gte: new Date() },
-      },
-    });
-
-    if (activeShows > 0) {
+    // Always safely archive if there are any associated shows (past or present)
+    // to preserve historical booking records and prevent foreign key violations.
+    if (existing.shows.length > 0) {
       return prisma.movie.update({
         where: { id },
         data: { status: 'ARCHIVED' },
       });
     }
 
+    // If movie was never scheduled for any show, safely delete it
     return prisma.movie.delete({ where: { id } });
   }
 

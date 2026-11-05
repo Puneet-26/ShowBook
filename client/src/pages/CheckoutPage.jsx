@@ -14,7 +14,7 @@ export default function CheckoutPage() {
   const [error, setError] = useState(null);
   const [paymentSimulationMode, setPaymentSimulationMode] = useState('SUCCESS');
   const [paymentMethod, setPaymentMethod] = useState('UPI');
-  const [idempotencyKey] = useState(
+  const [idempotencyKey, setIdempotencyKey] = useState(
     () => `idem_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`
   );
 
@@ -73,15 +73,19 @@ export default function CheckoutPage() {
     setPaying(true);
     setError(null);
 
+    const activeKey = idempotencyKey || `idem_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+
     try {
       const res = await api.post(`/bookings/reservations/${reservationId}/confirm`, {
-        idempotencyKey,
+        idempotencyKey: activeKey,
         simulatePaymentStatus: paymentSimulationMode,
       });
 
       const booking = res.data.data.booking;
       navigate(`/booking-confirmed/${booking.id}`, { replace: true });
     } catch (err) {
+      // Refresh idempotency key on failure so subsequent attempts retry smoothly
+      setIdempotencyKey(`idem_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`);
       setError(err.response?.data?.error || 'Payment failed. Please retry.');
     } finally {
       setPaying(false);

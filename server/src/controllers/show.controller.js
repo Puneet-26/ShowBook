@@ -3,8 +3,8 @@ const showService = require('../services/show.service');
 class ShowController {
   async getShows(req, res, next) {
     try {
-      const { movieId, theatreId, date } = req.query;
-      const shows = await showService.listShows({ movieId, theatreId, date });
+      const { movieId, theatreId, date, status } = req.query;
+      const shows = await showService.listShows({ movieId, theatreId, date, status });
       res.status(200).json({
         success: true,
         count: shows.length,
