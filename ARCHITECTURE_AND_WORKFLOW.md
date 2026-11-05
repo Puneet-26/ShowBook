@@ -314,6 +314,14 @@ WHERE "showId" = $showId AND "status" = 'PENDING' AND "expiresAt" <= NOW();
 ```
 This guarantees that any seat whose timer ran out is instantly returned to the available pool for all other users.
 
+### 3. Live Shared Seat Synchronization Across Users
+To maintain single-source-of-truth consistency across multiple active users without relying solely on manual reloads or heavy external dependencies (such as Redis or WebSockets):
+1. **Database as Single Source of Truth**: All seat occupancy statuses (`AVAILABLE`, `RESERVED`, `BOOKED`) are stored and enforced at the PostgreSQL row level.
+2. **Periodic Background Polling**: While viewing `SeatSelectionPage`, the frontend polls `GET /api/shows/:id` at a 4-second cadence to fetch real-time seat allocations from PostgreSQL.
+3. **Collision Detection & Deselection**: If User 2 is viewing a seat that User 1 just reserved or booked, the polling cycle automatically detects the change, marks the seat as unavailable on User 2's screen, deselects it if highlighted, and displays an informative notification.
+4. **Manual Sync Action**: A dedicated "Sync" button with animation enables immediate on-demand refresh.
+5. **Immediate Voluntary Release**: Users in the checkout session can click "Cancel & Release Seats" to immediately release their temporary hold back to `AVAILABLE` without waiting for the 5-minute timeout.
+
 ---
 
 ## 6. Idempotent Payment Simulation Engine
