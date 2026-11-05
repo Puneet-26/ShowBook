@@ -64,6 +64,18 @@ export default function CheckoutPage() {
     return () => clearInterval(interval);
   }, [reservation]);
 
+  const handleCancelReservation = async () => {
+    if (!window.confirm('Cancel this checkout session and release your held seats back to available?')) {
+      return;
+    }
+    try {
+      await api.post(`/reservations/${reservationId}/cancel`);
+    } catch {
+      // Continue navigation regardless
+    }
+    navigate('/');
+  };
+
   const handlePayment = async () => {
     if (timeLeft === 0) {
       alert('Reservation expired. Please select seats again.');
@@ -230,14 +242,24 @@ export default function CheckoutPage() {
         </div>
       </div>
 
-      {/* Pay Button */}
-      <button
-        onClick={handlePayment}
-        disabled={paying || timeLeft === 0}
-        className="w-full py-3 bg-rose-600 hover:bg-rose-700 disabled:bg-slate-300 text-white font-bold text-sm rounded-lg transition"
-      >
-        {paying ? 'Processing Payment...' : `Pay ₹${reservation.totalAmount}`}
-      </button>
+      {/* Pay and Cancel Buttons */}
+      <div className="flex flex-col sm:flex-row items-center gap-3">
+        <button
+          type="button"
+          onClick={handleCancelReservation}
+          disabled={paying}
+          className="w-full sm:w-auto py-3 px-5 border border-slate-300 hover:bg-slate-100 text-slate-700 font-semibold text-xs rounded-lg transition text-center"
+        >
+          Cancel & Release Seats
+        </button>
+        <button
+          onClick={handlePayment}
+          disabled={paying || timeLeft === 0}
+          className="w-full sm:flex-1 py-3 bg-rose-600 hover:bg-rose-700 disabled:bg-slate-300 text-white font-bold text-sm rounded-lg transition shadow-xs"
+        >
+          {paying ? 'Processing Payment...' : `Pay ₹${reservation.totalAmount}`}
+        </button>
+      </div>
     </div>
   );
 }

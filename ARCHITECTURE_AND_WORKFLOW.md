@@ -612,11 +612,12 @@ npx prisma db push
 npm run seed
 ```
 
-### 2. Default Seed Credentials
-| Role | Email | Password |
-|---|---|---|
-| **Demo User** | `user@showbook.com` | `User@12345` |
-| **System Admin** | `admin@showbook.com` | `Admin@12345` |
+### 2. Default Demo Credentials
+| Role | Email | Password | Purpose |
+|---|---|---|---|
+| **Demo User 1** | `user@showbook.com` | `User@12345` | Independent booking flow and personal tickets |
+| **Demo User 2** | `user2@showbook.com` | `User2@12345` | Verifying shared concurrent seat synchronization |
+| **System Admin** | `admin@showbook.com` | `Admin@12345` | Catalog manager, show scheduling & global audit |
 
 *(Note: One-click demo credential fill buttons are built directly into the Login page for instant demonstration).*
 

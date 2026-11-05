@@ -39,14 +39,24 @@ async function main() {
 
   const demoUser = await prisma.user.create({
     data: {
-      name: 'Rahul Sharma',
+      name: 'Demo User 1',
       email: 'user@showbook.com',
       passwordHash: userPasswordHash,
       role: 'USER',
     },
   });
 
-  console.log(`👤 Created users: Admin (${admin.email}) and Demo User (${demoUser.email})`);
+  const user2PasswordHash = await bcrypt.hash('User2@12345', salt);
+  const demoUser2 = await prisma.user.create({
+    data: {
+      name: 'Demo User 2',
+      email: 'user2@showbook.com',
+      passwordHash: user2PasswordHash,
+      role: 'USER',
+    },
+  });
+
+  console.log(`👤 Created users: Admin (${admin.email}), Demo User 1 (${demoUser.email}), Demo User 2 (${demoUser2.email})`);
 
   // 2. Seed Movies
   const movies = await Promise.all([

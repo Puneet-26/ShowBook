@@ -63,20 +63,27 @@ export default function LoginPage() {
           <span className="font-semibold text-slate-700 block mb-1.5">
             Quick Project Demo Logins:
           </span>
-          <div className="flex gap-2">
+          <div className="grid grid-cols-3 gap-1.5">
             <button
               type="button"
               onClick={() => fillCredentials('user@showbook.com', 'User@12345')}
-              className="flex-1 py-1.5 px-2 bg-white border border-slate-300 rounded font-medium text-slate-700 hover:bg-slate-100 transition text-[11px]"
+              className="py-1.5 px-2 bg-white border border-slate-300 rounded font-semibold text-slate-700 hover:bg-slate-100 transition text-[11px] text-center"
             >
-              Demo User
+              Demo User 1
+            </button>
+            <button
+              type="button"
+              onClick={() => fillCredentials('user2@showbook.com', 'User2@12345')}
+              className="py-1.5 px-2 bg-white border border-slate-300 rounded font-semibold text-slate-700 hover:bg-slate-100 transition text-[11px] text-center"
+            >
+              Demo User 2
             </button>
             <button
               type="button"
               onClick={() => fillCredentials('admin@showbook.com', 'Admin@12345')}
-              className="flex-1 py-1.5 px-2 bg-indigo-50 border border-indigo-200 rounded font-semibold text-indigo-700 hover:bg-indigo-100 transition text-[11px]"
+              className="py-1.5 px-2 bg-indigo-50 border border-indigo-200 rounded font-bold text-indigo-700 hover:bg-indigo-100 transition text-[11px] text-center"
             >
-              Admin Account
+              Admin
             </button>
           </div>
         </div>

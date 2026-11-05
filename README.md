@@ -94,16 +94,17 @@ Two concurrent users can never book or reserve the same seat for the same show:
 
 ---
 
-## 4. Default Seed Accounts
+## 4. Default Demo Accounts
 
-The database seed (`npm run seed`) populates realistic movies, theatres, screens, shows, and default accounts:
+The database includes three pre-configured accounts:
 
-| Role | Email | Password |
-|---|---|---|
-| **Demo User** | `user@showbook.com` | `User@12345` |
-| **System Admin** | `admin@showbook.com` | `Admin@12345` |
+| Role | Email | Password | Scope |
+|---|---|---|---|
+| **Demo User 1** | `user@showbook.com` | `User@12345` | Independent user browsing, seat reservations & personal ticket management |
+| **Demo User 2** | `user2@showbook.com` | `User2@12345` | Independent user verifying concurrent seat availability & separate bookings |
+| **System Admin** | `admin@showbook.com` | `Admin@12345` | Full administrative control, movie catalog manager, show scheduler & audit |
 
-*(Convenient one-click fill buttons are provided directly on the Login page for rapid demonstration).*
+*(Convenient one-click quick-fill buttons are provided directly on the Login page for rapid demonstration).*
 
 ---
 
