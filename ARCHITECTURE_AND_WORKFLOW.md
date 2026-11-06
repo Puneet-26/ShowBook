@@ -1,47 +1,56 @@
 # ShowBook — Architecture, Workflows & Technical Deep Dive
 
-> **Comprehensive Technical Reference, System Design, Concurrency Engine, and Operational Documentation for the ShowBook Movie Ticket Booking Platform.**
+> **Comprehensive Technical Reference, System Design, Concurrency Engine, Database Architecture, and Operational Runbook for the ShowBook Movie Ticket Booking Platform.**
 
 ---
 
 ## Table of Contents
 1. [Executive Summary](#1-executive-summary)
-2. [High-Level Architecture](#2-high-level-architecture)
+2. [High-Level Architecture & System Decomposition](#2-high-level-architecture--system-decomposition)
 3. [Database Architecture & Entity-Relationship Model](#3-database-architecture--entity-relationship-model)
 4. [Concurrency Engine & Double-Booking Prevention](#4-concurrency-engine--double-booking-prevention)
 5. [Seat Reservation Lifecycle & State Machine](#5-seat-reservation-lifecycle--state-machine)
-6. [Idempotent Payment Simulation Engine](#6-idempotent-payment-simulation-engine)
-7. [Cancellation & Seat Reclamation Engine](#7-cancellation--seat-reclamation-engine)
-8. [Security & Role-Based Access Control (RBAC)](#8-security--role-based-access-control-rbac)
-9. [End-to-End System Workflows](#9-end-to-end-system-workflows)
-10. [Automated Concurrency & Security Test Suite](#10-automated-concurrency--security-test-suite)
-11. [Complete REST API Specification](#11-complete-rest-api-specification)
-12. [Frontend Architecture & Component Hierarchy](#12-frontend-architecture--component-hierarchy)
-13. [Local Development & Operations Runbook](#13-local-development--operations-runbook)
+6. [Live Shared Seat Availability & Polling Synchronization](#6-live-shared-seat-availability--polling-synchronization)
+7. [Idempotent Payment Simulation Engine](#7-idempotent-payment-simulation-engine)
+8. [Cancellation & Seat Reclamation Engine](#8-cancellation--seat-reclamation-engine)
+9. [Security, Authentication & Role-Based Access Control (RBAC)](#9-security-authentication--role-based-access-control-rbac)
+10. [End-to-End System Workflows](#10-end-to-end-system-workflows)
+11. [Admin Management: Movie Catalog & Show Scheduling Engine](#11-admin-management-movie-catalog--show-scheduling-engine)
+12. [Automated Concurrency & Security Test Suite](#12-automated-concurrency--security-test-suite)
+13. [Complete REST API Specification](#13-complete-rest-api-specification)
+14. [Frontend Architecture & Component Hierarchy](#14-frontend-architecture--component-hierarchy)
+15. [Local Development, Docker Setup & Operations Runbook](#15-local-development-docker-setup--operations-runbook)
 
 ---
 
 ## 1. Executive Summary
 
-**ShowBook** is an enterprise-grade, full-stack movie ticket booking web platform engineered to demonstrate robust distributed-system principles, transactional integrity, and production-ready security. 
+**ShowBook** is an enterprise-grade, full-stack movie ticket booking web platform engineered to demonstrate robust distributed-system principles, transactional integrity, and production-ready security.
 
-While offering an intuitive, high-performance user experience inspired by platforms like BookMyShow, ShowBook is fundamentally built around solves to hard distributed data challenges:
+While offering an intuitive, responsive user experience inspired by platforms like BookMyShow, ShowBook is fundamentally built around solving hard distributed data challenges:
 - **Zero Double-Bookings**: Pessimistic row-level locking (`SELECT ... FOR UPDATE`) guarantees race-condition immunity under extreme concurrent checkout spikes.
 - **Deadlock Avoidance**: Deterministic resource sorting algorithms eliminate distributed deadlocks during simultaneous multi-seat selections.
+- **Live Shared Seat Synchronization**: PostgreSQL is the single source of truth; live 4-second polling ensures all users across separate browser sessions immediately observe real-time availability changes.
+- **Voluntary & Automated Seat Release**: 5-minute temporary holds expire automatically via inline transactional sweeps, while users can also voluntarily release held seats on demand.
 - **Idempotent Financial Simulation**: Client-generated idempotency keys ensure retried or dropped network requests never cause duplicate charges or redundant database records.
 - **Strict Data Ownership (IDOR Prevention)**: Object-level authorization guards guarantee users can never view, tamper with, or cancel bookings belonging to other accounts.
-- **Auditorium Scheduling Conflict Engine**: Automatic temporal overlap detection prevents scheduling conflicting shows within the same screen.
+- **Auditorium Scheduling Conflict Engine**: Automatic temporal overlap detection prevents scheduling conflicting shows within the same screen while auto-deriving show end times from film durations.
 
 ---
 
-## 2. High-Level Architecture
+## 2. High-Level Architecture & System Decomposition
 
-The platform follows a decoupled, three-tier architecture:
+The platform follows a decoupled, three-tier architecture containerized with Docker for seamless portability:
 
 ```
 +---------------------------------------------------------------------------------+
 |                                 CLIENT TIER                                     |
 |  React 19 (SPA) + Vite 8 + Tailwind CSS v4 + React Router v7 + Axios + Lucide   |
+|                                                                                 |
+|  - Real-time 4s Seat Polling Engine & Collision Auto-Deselection                |
+|  - Idempotent Checkout Session Management                                       |
+|  - Dynamic Role-Based Route Guards (Guest / Authenticated / Admin)              |
+|  - Responsive Dark-Themed UI with Instant Demo Login Selectors                  |
 +---------------------------------------------------------------------------------+
                                       |  HTTPS / JSON / JWT Cookie & Bearer
                                       v
@@ -60,10 +69,10 @@ The platform follows a decoupled, three-tier architecture:
 |                                                                                 |
 |   [Service & Business Logic Layer]                                              |
 |     ├── AuthService (Bcrypt Hashing, JWT Token Generation)                      |
-|     ├── MovieService (Catalog Filtering & Search)                               |
+|     ├── MovieService (Catalog Filtering, Creation, Updates & Safe Archival)     |
 |     ├── TheatreService (Auditorium & Seating Layouts)                           |
-|     ├── ShowService (Screen Overlap Conflict Engine)                            |
-|     ├── ReservationService (Pessimistic Locking & Expiry Sweeper)               |
+|     ├── ShowService (Screen Overlap Conflict Engine & Auto End-Time Derivation) |
+|     ├── ReservationService (Pessimistic Locking, Voluntary & Auto Expiry Sweep) |
 |     ├── BookingService (Idempotent Payment, Confirmation & Cancellation)        |
 |     └── AdminService (Metrics Aggregation & Global Booking Audits)              |
 +---------------------------------------------------------------------------------+
@@ -71,11 +80,12 @@ The platform follows a decoupled, three-tier architecture:
                                       v
 +---------------------------------------------------------------------------------+
 |                               DATABASE TIER                                     |
-|                           PostgreSQL 18 RDBMS                                   |
+|                      PostgreSQL 16 Alpine (Docker)                              |
 |                                                                                 |
 |     ├── ACID Transactions (prisma.$transaction)                                 |
 |     ├── Row-Level Pessimistic Locks (SELECT ... FOR UPDATE)                     |
 |     ├── Unique Compound Indexes (ShowSeatAllocation: [showId, seatId])          |
+|     ├── Unique Idempotency Keys (PaymentAttempt: idempotencyKey)                |
 |     └── Foreign Key Cascades & Strict Referential Integrity                     |
 +---------------------------------------------------------------------------------+
 ```
@@ -224,11 +234,10 @@ erDiagram
 ## 4. Concurrency Engine & Double-Booking Prevention
 
 ### The Problem
-In high-demand ticketing platforms, hundreds of users may attempt to click "Book Seat" on the exact same VIP or recliner seat at the same millisecond. 
-A naive implementation reads the seat status (`AVAILABLE`), verifies it in application memory, and writes `BOOKED`. Under concurrency, two requests pass the read check before either writes, resulting in **double booking**.
+In high-demand ticketing platforms, multiple users may attempt to click "Book Seat" on the exact same seat at the same millisecond. A naive implementation reads the seat status (`AVAILABLE`), verifies it in application memory, and writes `BOOKED`. Under concurrency, two requests pass the read check before either writes, resulting in **double booking**.
 
 ### The Solution in ShowBook
-ShowBook employs a five-layer defense strategy:
+ShowBook employs a 5-layer defense strategy:
 
 ```
 [Incoming Concurrent Requests for Seat A1 & A2]
@@ -268,7 +277,7 @@ ShowBook employs a five-layer defense strategy:
 When multiple transactions lock multiple rows, they can create a cyclical wait (Deadlock) if they acquire locks in opposing orders:
 - User 1 locks `Seat A`, then requests `Seat B`.
 - User 2 locks `Seat B`, then requests `Seat A`.
-- Both threads freeze forever until database deadlock detection terminates one.
+- Both threads freeze forever until database deadlock detection aborts one.
 
 ShowBook completely eliminates this by sorting all requested seat IDs lexicographically prior to lock acquisition:
 ```javascript
@@ -285,10 +294,10 @@ Every seat allocation moves through a deterministic finite state machine (FSM):
 
 ```mermaid
 stateDiagram-v2
-    [*] --> AVAILABLE : Show Created (Seeded)
+    [*] --> AVAILABLE : Show Created (Allocations Generated)
     AVAILABLE --> RESERVED : User Holds Seats (5-Min Lock)
     RESERVED --> AVAILABLE : 5-Minute Timer Expires (Auto Sweeper)
-    RESERVED --> AVAILABLE : User Manually Aborts Checkout
+    RESERVED --> AVAILABLE : User Clicks "Cancel & Release Seats"
     RESERVED --> BOOKED : Payment Succeeded & Confirmed
     BOOKED --> AVAILABLE : Booking Cancelled (>= 2h Before Show)
     BOOKED --> [*] : Show Completed
@@ -314,19 +323,28 @@ WHERE "showId" = $showId AND "status" = 'PENDING' AND "expiresAt" <= NOW();
 ```
 This guarantees that any seat whose timer ran out is instantly returned to the available pool for all other users.
 
-### 3. Live Shared Seat Synchronization Across Users
-To maintain single-source-of-truth consistency across multiple active users without relying solely on manual reloads or heavy external dependencies (such as Redis or WebSockets):
-1. **Database as Single Source of Truth**: All seat occupancy statuses (`AVAILABLE`, `RESERVED`, `BOOKED`) are stored and enforced at the PostgreSQL row level.
-2. **Periodic Background Polling**: While viewing `SeatSelectionPage`, the frontend polls `GET /api/shows/:id` at a 4-second cadence to fetch real-time seat allocations from PostgreSQL.
-3. **Collision Detection & Deselection**: If User 2 is viewing a seat that User 1 just reserved or booked, the polling cycle automatically detects the change, marks the seat as unavailable on User 2's screen, deselects it if highlighted, and displays an informative notification.
-4. **Manual Sync Action**: A dedicated "Sync" button with animation enables immediate on-demand refresh.
-5. **Immediate Voluntary Release**: Users in the checkout session can click "Cancel & Release Seats" to immediately release their temporary hold back to `AVAILABLE` without waiting for the 5-minute timeout.
+### 3. Immediate Voluntary Seat Release
+If a user decides not to proceed, they do not need to lock other users out for 5 minutes. The checkout page features a **Cancel & Release Seats** action that calls:
+`POST /api/reservations/:id/cancel`
+This immediately resets the reservation to `CANCELLED` and sets the seat allocations back to `AVAILABLE`.
 
 ---
 
-## 6. Idempotent Payment Simulation Engine
+## 6. Live Shared Seat Availability & Polling Synchronization
 
-Network connections on mobile and web are inherently unreliable. If a user clicks "Pay Now" and the network stutters, they will click "Pay Now" a second time. Without idempotency guards, this triggers double billing and duplicate booking records.
+To maintain a true single-source-of-truth across multiple active users without requiring external brokers or fragile state synchronizers:
+
+1. **Database as Single Source of Truth**: All seat occupancy statuses (`AVAILABLE`, `RESERVED`, `BOOKED`) are stored and enforced at the PostgreSQL row level.
+2. **Periodic Background Polling**: While viewing `SeatSelectionPage`, the frontend polls `GET /api/shows/:id` at a 4-second cadence to fetch real-time seat allocations from PostgreSQL.
+3. **Collision Detection & Deselection**: If User 2 is highlighting a seat that User 1 just reserved or booked, the polling cycle automatically detects the change, marks the seat as unavailable on User 2's screen, deselects it if highlighted, and displays an informative notification.
+4. **Manual Sync Action**: A dedicated "Sync" button with animation enables immediate on-demand refresh.
+5. **Session Isolation**: Each user maintains their own authenticated session and booking history, while sharing real-time visibility into the auditorium's seating matrix.
+
+---
+
+## 7. Idempotent Payment Simulation Engine
+
+Network connections on mobile and web are inherently unreliable. If a user clicks "Pay Now" and the network stutters, they may click "Pay Now" a second time. Without idempotency guards, this triggers double billing and duplicate booking records.
 
 ### How ShowBook Guarantees Idempotency:
 
@@ -356,7 +374,7 @@ POST /api/bookings/reservations/:id/confirm { idempotencyKey, simulatePaymentSta
        │
        ├──> Process Payment Simulation:
        │      ├─► If simulatePaymentStatus === 'FAILED':
-       │      │   - Save PaymentAttempt with status FAILED
+       │      │   - Upsert PaymentAttempt with status FAILED
        │      │   - Keep reservation alive so user can retry before 5-minute timeout
        │      │   - Return HTTP 402 Payment Required
        │      │
@@ -365,13 +383,13 @@ POST /api/bookings/reservations/:id/confirm { idempotencyKey, simulatePaymentSta
        │          - Create BookingSeat snapshot records
        │          - Update ShowSeatAllocation rows to BOOKED
        │          - Update Reservation status to CONFIRMED
-       │          - Record PaymentAttempt with status SUCCESS and transactionRef
+       │          - Upsert PaymentAttempt with status SUCCESS and transactionRef
        │          - Commit Transaction & Return HTTP 201 Created with E-Ticket
 ```
 
 ---
 
-## 7. Cancellation & Seat Reclamation Engine
+## 8. Cancellation & Seat Reclamation Engine
 
 ShowBook provides a seamless, self-service cancellation workflow with strict business policy validation:
 
@@ -386,7 +404,7 @@ ShowBook provides a seamless, self-service cancellation workflow with strict bus
 
 ---
 
-## 8. Security & Role-Based Access Control (RBAC)
+## 9. Security, Authentication & Role-Based Access Control (RBAC)
 
 ShowBook enforces a defense-in-depth security model:
 
@@ -428,32 +446,54 @@ ShowBook enforces a defense-in-depth security model:
 
 ---
 
-## 9. End-to-End System Workflows
+## 10. End-to-End System Workflows
 
 ### Workflow A: Customer Discovery to Ticket Purchase
 1. **Movie Catalog**: User lands on `/` and browses films filtered by Genre and Language.
 2. **Showtime Selection**: User clicks on a film to view `/movies/:id`, selects a preferred Date and Theatre, and chooses a Showtime slot.
 3. **Interactive Auditorium Map**: User navigates to `/shows/:id/seats`. The page renders real-time color-coded seats:
    - Green / White: Available (Regular ₹200, Premium ₹300, VIP ₹450)
-   - Orange / Yellow: Held in active reservation
-   - Gray / Red: Already booked
+   - Orange / Amber: Held in active reservation
+   - Red / Gray: Already booked
 4. **Reserve Seats**: User selects desired seats and clicks "Proceed to Checkout". The backend locks the seats and issues a 5-minute reservation.
 5. **Checkout & Payment Simulation**: User is routed to `/checkout/:reservationId`. A countdown timer counts down from 05:00. The user selects "Simulate Successful Payment" or "Simulate Payment Failure" to test edge cases.
 6. **E-Ticket & QR Code**: Upon payment success, user is redirected to `/booking-confirmed/:id`, displaying an interactive digital ticket with reference code, seats, and a scannable QR code.
 
-### Workflow B: Administrator Management
-1. **Dashboard Overview**: Admin logs into `/admin` to view live business metrics:
-   - Total Confirmed Bookings
-   - Gross Revenue (₹)
-   - Active Shows and Movies
-2. **Global Bookings Audit**: Admin searches all system bookings by customer name, booking reference, or status.
-3. **Movie Management**: Admin can add new movies to the catalog or archive existing titles.
-4. **Show Scheduling Conflict Engine**: Admin schedules a show by selecting Movie, Screen, Start Time, and Base Price. The backend automatically computes the end time (`startTime + movie.durationMins`) and verifies no other show is scheduled on that screen during that interval.
-5. **Emergency Show Cancellation**: Admin cancels a show, automatically cancelling all associated bookings and releasing seats.
+### Workflow B: Multi-User Concurrent Seat Synchronization Walkthrough
+1. **User 1 (Chrome Normal Window)**: Log in as Demo User 1 (`user@showbook.com`). Navigate to *Stree 2*, select the showtime, and view the auditorium map.
+2. **User 2 (Chrome Incognito Window)**: Log in as Demo User 2 (`user2@showbook.com`). Navigate to the same showtime. Both users initially observe identical availability.
+3. **Hold Action**: User 1 clicks seat `A5` and clicks **Proceed to Checkout**.
+4. **Live Synchronization**: Within 4 seconds, User 2's screen polls PostgreSQL and updates seat `A5` to **RESERVED**. If User 2 was highlighting `A5`, it is automatically deselected and an alert is displayed.
+5. **Purchase Confirmation**: User 1 completes checkout with simulated payment. Seat `A5` immediately becomes **BOOKED** across all connected sessions.
 
 ---
 
-## 10. Automated Concurrency & Security Test Suite
+## 11. Admin Management: Movie Catalog & Show Scheduling Engine
+
+The admin panel at `/admin` provides full operational control over films and auditoriums:
+
+### Movie Catalog Management
+- **Add Movie**: Specify Title, Description, Genre, Language, Duration in minutes, Age Rating (`U`, `UA`, `A`), Release Date, and Poster URL. Real-time preview confirms visual rendering.
+- **Edit Movie**: Update existing movie metadata, duration, or change availability status between `NOW_SHOWING`, `UPCOMING`, and `ARCHIVED`.
+- **Safe Archival**: Deleting or archiving a movie sets its status to `ARCHIVED` without cascading deletions to historical bookings or revenue records.
+
+### Show Scheduling Conflict Engine
+When scheduling a show:
+1. Admin selects a Movie, Theatre Screen, Start Time, and Base Price.
+2. The server automatically derives `endTime = startTime + movie.durationMins`.
+3. The server executes a conflict query to guarantee no overlapping shows exist on that screen:
+   ```sql
+   SELECT * FROM "Show"
+   WHERE "screenId" = $screenId
+     AND "status" != 'CANCELLED'
+     AND ("startTime" < $endTime AND "endTime" > $startTime);
+   ```
+4. If an overlap is detected, the request is rejected with `HTTP 409 Conflict`.
+5. Upon successful creation, the backend automatically generates `ShowSeatAllocation` rows for every physical seat in the auditorium screen.
+
+---
+
+## 12. Automated Concurrency & Security Test Suite
 
 The automated test suite is powered by **Vitest** and **Supertest** located in `server/tests/`:
 
@@ -502,7 +542,7 @@ const [res1, res2] = await Promise.all([
 
 ---
 
-## 11. Complete REST API Specification
+## 13. Complete REST API Specification
 
 ### Authentication (`/api/auth`)
 | Method | Endpoint | Access | Description |
@@ -517,7 +557,7 @@ const [res1, res2] = await Promise.all([
 ### Movies (`/api/movies`)
 | Method | Endpoint | Access | Description |
 |---|---|---|---|
-| `GET` | `/api/movies` | Public | List movies with optional `search`, `genre`, `language` filters. |
+| `GET` | `/api/movies` | Public | List movies with optional `search`, `genre`, `language`, and `status` filters. |
 | `GET` | `/api/movies/filters` | Public | Get distinct list of genres and languages in catalog. |
 | `GET` | `/api/movies/:id` | Public | Get movie details with scheduled theatres, screens, and shows. |
 
@@ -530,7 +570,7 @@ const [res1, res2] = await Promise.all([
 ### Shows & Auditorium Seating (`/api/shows`)
 | Method | Endpoint | Access | Description |
 |---|---|---|---|
-| `GET` | `/api/shows` | Public | List scheduled shows with date/theatre filters. |
+| `GET` | `/api/shows` | Public | List scheduled shows with date, theatre, and status filters. |
 | `GET` | `/api/shows/:id` | Public | Retrieve show details and full real-time interactive seat layout with allocation statuses (`AVAILABLE`, `RESERVED`, `BOOKED`). |
 
 ### Reservations (`/api/reservations`)
@@ -538,7 +578,7 @@ const [res1, res2] = await Promise.all([
 |---|---|---|---|
 | `POST` | `/api/reservations` | Authenticated | Atomically acquire 5-minute hold on requested `seatIds`. Row-level locked. |
 | `GET` | `/api/reservations/:id` | Authenticated | Inspect reservation status, seat breakdown, and countdown timer. |
-| `POST` | `/api/reservations/:id/cancel` | Authenticated | Manually release held seats back to available pool. |
+| `POST` | `/api/reservations/:id/cancel` | Authenticated | Voluntarily release held seats back to the available pool. |
 
 ### Bookings (`/api/bookings`)
 | Method | Endpoint | Access | Description |
@@ -554,15 +594,16 @@ const [res1, res2] = await Promise.all([
 | `GET` | `/api/admin/dashboard` | Admin Only | Global metrics: Total Bookings, Revenue, Active Movies, Shows. |
 | `GET` | `/api/admin/bookings` | Admin Only | Search and inspect all system bookings with status filtering. |
 | `POST` | `/api/admin/movies` | Admin Only | Add a new movie to the global catalog. |
-| `DELETE` | `/api/admin/movies/:id` | Admin Only | Archive a movie from active listings. |
+| `PATCH` | `/api/admin/movies/:id` | Admin Only | Update an existing movie's information, release date, and status. |
+| `DELETE` | `/api/admin/movies/:id` | Admin Only | Archive a movie safely without breaking historical booking records. |
 | `POST` | `/api/admin/shows` | Admin Only | Schedule a new show with automated auditorium time-conflict validation. |
 | `POST` | `/api/admin/shows/:id/cancel`| Admin Only | Emergency show cancellation with automatic booking cascade. |
 
 ---
 
-## 12. Frontend Architecture & Component Hierarchy
+## 14. Frontend Architecture & Component Hierarchy
 
-The frontend is a single-page application built with React 19, Vite, and Tailwind CSS:
+The frontend is a single-page application built with React 19, Vite 8, and Tailwind CSS v4:
 
 ```
 client/src/
@@ -580,25 +621,32 @@ client/src/
   └── pages/
         ├── HomePage.jsx           # Movie discovery with live search & filters
         ├── MovieDetailsPage.jsx   # Movie overview, trailer info, and showtime picker
-        ├── SeatSelectionPage.jsx  # Interactive auditorium seat map with live status
-        ├── CheckoutPage.jsx       # 5-min timer, order breakdown, simulated payment
+        ├── SeatSelectionPage.jsx  # Interactive auditorium seat map with live 4s polling
+        ├── CheckoutPage.jsx       # 5-min timer, order breakdown, simulated payment & voluntary cancel
         ├── BookingConfirmationPage.jsx # Digital ticket receipt with scannable QR code
         ├── MyBookingsPage.jsx     # User ticket history with self-service cancellation
         ├── ProfilePage.jsx        # Account details & password manager
         ├── LoginPage.jsx          # User & Admin login with 1-click demo buttons
         ├── RegisterPage.jsx       # User registration
-        └── AdminDashboardPage.jsx # Analytics dashboard, booking inspector, show scheduler
+        └── AdminDashboardPage.jsx # Metrics dashboard, booking inspector, movie editor, show scheduler
 ```
 
 ---
 
-## 13. Local Development & Operations Runbook
+## 15. Local Development, Docker Setup & Operations Runbook
 
 ### Prerequisites
 - Node.js (v18+ or v24 recommended)
-- PostgreSQL 18 running on port `5432`
+- Docker Desktop (or local PostgreSQL on port `5432`)
 
-### Backend Configuration (`server/.env`)
+### 1. Launch Database via Docker Compose
+From the root directory of the repository:
+```bash
+docker compose up -d
+```
+This starts PostgreSQL 16 on port `5432`.
+
+### 2. Backend Configuration (`server/.env`)
 ```env
 PORT=5000
 NODE_ENV=development
@@ -610,42 +658,32 @@ RESERVATION_EXPIRY_MINUTES=5
 CANCELLATION_DEADLINE_HOURS=2
 ```
 
-### 1. Database Setup & Seeding
+### 3. Database Initialization & Seeding
 From the `server/` directory:
 ```bash
 # Push schema migrations
 npx prisma db push
 
-# Populate initial movies, theatres, screens, shows, and default accounts
+# Populate initial movies, theatres, screens, shows, and demo accounts
 npm run seed
 ```
 
-### 2. Default Demo Credentials
-| Role | Email | Password | Purpose |
-|---|---|---|---|
-| **Demo User 1** | `user@showbook.com` | `User@12345` | Independent booking flow and personal tickets |
-| **Demo User 2** | `user2@showbook.com` | `User2@12345` | Verifying shared concurrent seat synchronization |
-| **System Admin** | `admin@showbook.com` | `Admin@12345` | Catalog manager, show scheduling & global audit |
-
-*(Note: One-click demo credential fill buttons are built directly into the Login page for instant demonstration).*
-
-### 3. Running Development Servers
+### 4. Running Development Servers
 ```bash
-# In Terminal 1 (Backend API):
+# Terminal 1: Backend API
 cd server
 npm run dev
 # Server listening at http://localhost:5000
 
-# In Terminal 2 (Frontend Client):
+# Terminal 2: Frontend Client
 cd client
 npm run dev
 # Vite client listening at http://localhost:5173
 ```
 
-### 4. Running the Automated Test Suite
-```bash
-cd server
-npm test
-```
-All 16 tests covering concurrency, race conditions, idempotency, authorization, and cancellation will execute and verify the system's resilience.
-
+### 5. Demo Accounts Quick Reference
+| Role | Email | Password | Scope |
+|---|---|---|---|
+| **Demo User 1** | `user@showbook.com` | `User@12345` | Movie booking, seat reservations & personal ticket receipts |
+| **Demo User 2** | `user2@showbook.com` | `User2@12345` | Independent session for verifying live shared seat synchronization |
+| **Demo Admin** | `admin@showbook.com` | `Admin@12345` | Movie catalog management, show scheduling & global audit |
